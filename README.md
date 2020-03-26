@@ -21,7 +21,7 @@ $ make -j$(nproc) check
 $ make install
 $ cd ..
 
-$ git clone git@github.com:ueno/ngtcp2.git
+$ git clone https://github.com/ueno/ngtcp2.git
 $ cd ngtcp2
 $ autoreconf -i
 $ ./configure --prefix=$installdir --enable-lib-only
