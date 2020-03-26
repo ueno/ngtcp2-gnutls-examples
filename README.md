@@ -23,6 +23,7 @@ $ cd ..
 
 $ git clone https://github.com/ueno/ngtcp2.git
 $ cd ngtcp2
+$ git checkout wip/dueno/crypto-gnutls
 $ autoreconf -i
 $ ./configure --prefix=$installdir --enable-lib-only
 $ make -j$(nproc) check
