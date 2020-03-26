@@ -185,7 +185,7 @@ struct Crypto {
 
 class Client {
 public:
-  Client(struct ev_loop *loop, gnutls_session_t session);
+  Client(struct ev_loop *loop, gnutls_certificate_credentials_t cred);
   ~Client();
 
   int init(int fd, const Address &local_addr, const Address &remote_addr,
@@ -270,6 +270,7 @@ private:
   ev_timer delay_stream_timer_;
   ev_signal sigintev_;
   struct ev_loop *loop_;
+  gnutls_certificate_credentials_t cred_;
   gnutls_session_t session_;
   int fd_;
   std::map<int64_t, std::unique_ptr<Stream>> streams_;

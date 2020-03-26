@@ -358,12 +358,12 @@ void siginthandler(struct ev_loop *loop, ev_signal *w, int revents) {
 }
 } // namespace
 
-Client::Client(struct ev_loop *loop, gnutls_session_t session)
+Client::Client(struct ev_loop *loop, gnutls_certificate_credentials_t cred)
     : local_addr_{},
       remote_addr_{},
       max_pktlen_(0),
       loop_(loop),
-      session_(session),
+      cred_(cred),
       fd_(-1),
       crypto_{},
       qlog_(nullptr),
@@ -437,6 +437,11 @@ void Client::close() {
   if (fd_ != -1) {
     ::close(fd_);
     fd_ = -1;
+  }
+
+  if (session_) {
+    gnutls_deinit(session_);
+    session_ = nullptr;
   }
 
   if (qlog_) {
@@ -747,8 +752,104 @@ int Client::extend_max_stream_data(int64_t stream_id, uint64_t max_data) {
   return 0;
 }
 
+namespace {
+int secret_func(gnutls_session_t session,
+                gnutls_record_encryption_level_t level, const void *secret_read,
+                const void *secret_write, size_t secret_size) {
+  auto c = static_cast<Client *>(gnutls_session_get_ptr(session));
+  if (c->on_key(util::from_gtls_level(level),
+                reinterpret_cast<const uint8_t *>(secret_read),
+                reinterpret_cast<const uint8_t *>(secret_write),
+                secret_size) != 0) {
+    return -1;
+  }
+
+  return 0;
+}
+
+} // namespace
+
+namespace {
+int read_func(gnutls_session_t session, gnutls_record_encryption_level_t level,
+              gnutls_handshake_description_t htype, const void *data,
+              size_t data_size) {
+  if (htype == GNUTLS_HANDSHAKE_CHANGE_CIPHER_SPEC)
+    return 0;
+
+  auto c = static_cast<Client *>(gnutls_session_get_ptr(session));
+  c->write_client_handshake(util::from_gtls_level(level),
+                            reinterpret_cast<const uint8_t *>(data), data_size);
+  return 0;
+}
+} // namespace
+
+namespace {
+int alert_read_func(gnutls_session_t session,
+                    gnutls_record_encryption_level_t level,
+                    gnutls_alert_level_t alert_level,
+                    gnutls_alert_description_t alert_desc) {
+  auto c = static_cast<Client *>(gnutls_session_get_ptr(session));
+  c->set_tls_alert(alert_desc);
+  return 0;
+}
+} // namespace
+
+namespace {
+std::ofstream keylog_file;
+int keylog_callback(gnutls_session_t session, const char *label,
+                    const gnutls_datum_t *secret) {
+  keylog_file.write(label, strlen(label));
+  keylog_file.put(' ');
+
+  gnutls_datum_t crandom;
+  gnutls_datum_t srandom;
+
+  gnutls_session_get_random(session, &crandom, &srandom);
+  if (crandom.size != 32) {
+    return -1;
+  }
+
+  auto crandom_hex =
+      util::format_hex(reinterpret_cast<unsigned char *>(crandom.data), 32);
+  keylog_file << crandom_hex << " ";
+
+  auto secret_hex = util::format_hex(
+      reinterpret_cast<unsigned char *>(secret->data), secret->size);
+  keylog_file << secret_hex << " ";
+
+  keylog_file.put('\n');
+  keylog_file.flush();
+  return 0;
+}
+} // namespace
+
 int Client::init_session() {
+  if (auto rv = gnutls_init(&session_, GNUTLS_CLIENT); rv != 0) {
+    std::cerr << "gnutls_init failed: " << gnutls_strerror(rv) << std::endl;
+  }
+
+  if (auto rv = gnutls_priority_set_direct(session_, config.priority, NULL);
+      rv != 0) {
+    std::cerr << "gnutls_priority_set_direct failed: " << gnutls_strerror(rv)
+              << std::endl;
+  }
+
+  gnutls_handshake_set_secret_function(session_, secret_func);
+  gnutls_handshake_set_read_function(session_, read_func);
+  gnutls_alert_set_read_function(session_, alert_read_func);
+
   gnutls_session_set_ptr(session_, this);
+
+  if (auto rv = gnutls_credentials_set(session_, GNUTLS_CRD_CERTIFICATE, cred_);
+      rv != 0) {
+    std::cerr << "gnutls_credentials_set failed: " << gnutls_strerror(rv)
+              << std::endl;
+    exit(EXIT_FAILURE);
+  }
+
+  if (keylog_file) {
+    gnutls_session_set_keylog_function(session_, keylog_callback);
+  }
 
   gnutls_datum_t alpn = {NULL, 0};
 
@@ -2076,70 +2177,6 @@ int Client::setup_httpconn() {
 }
 
 namespace {
-int secret_func(gnutls_session_t session,
-                gnutls_record_encryption_level_t level, const void *secret_read,
-                const void *secret_write, size_t secret_size) {
-  auto c = static_cast<Client *>(gnutls_session_get_ptr(session));
-  if (c->on_key(util::from_gtls_level(level),
-                reinterpret_cast<const uint8_t *>(secret_read),
-                reinterpret_cast<const uint8_t *>(secret_write),
-                secret_size) != 0) {
-    return -1;
-  }
-
-  return 0;
-}
-
-} // namespace
-
-namespace {
-int read_func(gnutls_session_t session, gnutls_record_encryption_level_t level,
-              gnutls_handshake_description_t htype, const void *data,
-              size_t data_size) {
-  if (htype == GNUTLS_HANDSHAKE_CHANGE_CIPHER_SPEC)
-    return 0;
-
-  auto c = static_cast<Client *>(gnutls_session_get_ptr(session));
-  c->write_client_handshake(util::from_gtls_level(level),
-                            reinterpret_cast<const uint8_t *>(data), data_size);
-  return 0;
-}
-} // namespace
-
-namespace {
-int alert_read_func(gnutls_session_t session,
-                    gnutls_record_encryption_level_t level,
-                    gnutls_alert_level_t alert_level,
-                    gnutls_alert_description_t alert_desc) {
-  auto c = static_cast<Client *>(gnutls_session_get_ptr(session));
-  c->set_tls_alert(alert_desc);
-  return 0;
-}
-} // namespace
-
-namespace {
-gnutls_session_t create_session(void) {
-  gnutls_session_t session;
-
-  if (auto rv = gnutls_init(&session, GNUTLS_CLIENT); rv != 0) {
-    std::cerr << "gnutls_init failed: " << gnutls_strerror(rv) << std::endl;
-  }
-
-  if (auto rv = gnutls_priority_set_direct(session, config.priority, NULL);
-      rv != 0) {
-    std::cerr << "gnutls_priority_set_direct failed: " << gnutls_strerror(rv)
-              << std::endl;
-  }
-
-  gnutls_handshake_set_secret_function(session, secret_func);
-  gnutls_handshake_set_read_function(session, read_func);
-  gnutls_alert_set_read_function(session, alert_read_func);
-
-  return session;
-}
-} // namespace
-
-namespace {
 int run(Client &c, const char *addr, const char *port) {
   Address remote_addr, local_addr;
 
@@ -2226,35 +2263,6 @@ int parse_requests(char **argv, size_t argvlen) {
     }
     config.requests.emplace_back(std::move(req));
   }
-  return 0;
-}
-} // namespace
-
-namespace {
-std::ofstream keylog_file;
-int keylog_callback(gnutls_session_t session, const char *label,
-                    const gnutls_datum_t *secret) {
-  keylog_file.write(label, strlen(label));
-  keylog_file.put(' ');
-
-  gnutls_datum_t crandom;
-  gnutls_datum_t srandom;
-
-  gnutls_session_get_random(session, &crandom, &srandom);
-  if (crandom.size != 32) {
-    return -1;
-  }
-
-  auto crandom_hex =
-      util::format_hex(reinterpret_cast<unsigned char *>(crandom.data), 32);
-  keylog_file << crandom_hex << " ";
-
-  auto secret_hex = util::format_hex(
-      reinterpret_cast<unsigned char *>(secret->data), secret->size);
-  keylog_file << secret_hex << " ";
-
-  keylog_file.put('\n');
-  keylog_file.flush();
   return 0;
 }
 } // namespace
@@ -2735,24 +2743,11 @@ int main(int argc, char **argv) {
 
   auto xcred_d = defer(gnutls_certificate_free_credentials, xcred);
 
-  auto session = create_session();
-  auto session_d = defer(gnutls_deinit, session);
-
-  if (auto rv = gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, xcred);
-      rv != 0) {
-    std::cerr << "gnutls_credentials_set failed: " << gnutls_strerror(rv)
-              << std::endl;
-    exit(EXIT_FAILURE);
-  }
-
   auto ev_loop_d = defer(ev_loop_destroy, EV_DEFAULT);
 
   auto keylog_filename = getenv("SSLKEYLOGFILE");
   if (keylog_filename) {
     keylog_file.open(keylog_filename, std::ios_base::app);
-    if (keylog_file) {
-      gnutls_session_set_keylog_function(session, keylog_callback);
-    }
   }
 
   if (util::generate_secret(config.static_secret.data(),
@@ -2761,7 +2756,7 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  Client c(EV_DEFAULT, session);
+  Client c(EV_DEFAULT, xcred);
 
   if (run(c, addr, port) != 0) {
     exit(EXIT_FAILURE);
