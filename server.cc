@@ -746,6 +746,11 @@ int Handler::handshake_completed() {
     }
   }
 
+  if (auto rv = gnutls_session_ticket_send(session_, 1, 0); rv != 0) {
+    std::cerr << "gnutls_session_ticket_send failed: "
+	      << gnutls_strerror(rv) << std::endl;
+  }
+
   return 0;
 }
 
@@ -1461,6 +1466,23 @@ int Handler::init(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
       rv != 0) {
     std::cerr << "gnutls_priority_set_direct failed: " << gnutls_strerror(rv)
               << std::endl;
+    return -1;
+  }
+
+  gnutls_datum_t key;
+
+  if (auto rv = gnutls_session_ticket_key_generate(&key); rv != 0) {
+    std::cerr << "gnutls_session_ticket_key_generate failed: "
+	      << gnutls_strerror(rv) << std::endl;
+    return -1;
+  }
+
+  auto rv = gnutls_session_ticket_enable_server(session_, &key);
+  gnutls_memset(key.data, 0, key.size);
+  gnutls_free(key.data);
+  if (rv != 0) {
+    std::cerr << "gnutls_session_ticket_enable_server failed: "
+	      << gnutls_strerror(rv) << std::endl;
     return -1;
   }
 
