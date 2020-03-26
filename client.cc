@@ -867,6 +867,7 @@ int Client::init_session() {
   if (config.session_file) {
     auto f = std::ifstream(config.session_file);
     if (f) {
+      f.seekg(0, std::ios::end);
       auto pos = f.tellg();
       std::vector<char> content(pos);
       f.seekg(0, std::ios::beg);
