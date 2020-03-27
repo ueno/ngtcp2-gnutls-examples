@@ -261,6 +261,8 @@ public:
              const uint8_t *wsecret, size_t secretlen);
 
   void set_tls_alert(uint8_t alert);
+  int set_remote_transport_params(const uint8_t *data, size_t datalen);
+  int append_local_transport_params(gnutls_buffer_st *extdata);
 
   int update_key(uint8_t *rx_secret, uint8_t *tx_secret, uint8_t *rx_key,
                  uint8_t *rx_iv, uint8_t *tx_key, uint8_t *tx_iv,

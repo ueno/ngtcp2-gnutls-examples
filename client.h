@@ -236,6 +236,8 @@ public:
              const uint8_t *tx_secret, size_t secretlen);
 
   void set_tls_alert(uint8_t alert);
+  int set_remote_transport_params(const uint8_t *data, size_t datalen);
+  int append_local_transport_params(gnutls_buffer_st *extdata);
 
   int select_preferred_address(Address &selected_addr,
                                const ngtcp2_preferred_addr *paddr);

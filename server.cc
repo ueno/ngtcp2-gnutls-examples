@@ -1380,6 +1380,75 @@ int anti_replay_db_add_func(void *dbf, time_t exp_time,
 } // namespace
 
 namespace {
+int tp_recv_func(gnutls_session_t session, const uint8_t *data,
+                 size_t data_size) {
+  auto h = static_cast<Handler *>(gnutls_session_get_ptr(session));
+  if (h->set_remote_transport_params(data, data_size) != 0) {
+    return -1;
+  }
+  return 0;
+}
+} // namespace
+
+int Handler::set_remote_transport_params(const uint8_t *data, size_t datalen) {
+  ngtcp2_transport_params params;
+
+  if (auto rv = ngtcp2_decode_transport_params(
+          &params, NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS, data,
+          datalen);
+      rv != 0) {
+    std::cerr << "ngtcp2_decode_transport_params: " << ngtcp2_strerror(rv)
+              << std::endl;
+    return -1;
+  }
+
+  if (auto rv = ngtcp2_conn_set_remote_transport_params(conn_, &params);
+      rv != 0) {
+    std::cerr << "ngtcp2_conn_set_remote_transport_params: "
+              << ngtcp2_strerror(rv) << std::endl;
+    return -1;
+  }
+
+  return 0;
+}
+
+namespace {
+int tp_send_func(gnutls_session_t session, gnutls_buffer_st *extdata) {
+  auto h = static_cast<Handler *>(gnutls_session_get_ptr(session));
+  auto nwrite = h->append_local_transport_params(extdata);
+  if (nwrite < 0) {
+    return -1;
+  }
+  return nwrite;
+}
+} // namespace
+
+int Handler::append_local_transport_params(gnutls_buffer_st *extdata) {
+  ngtcp2_transport_params params;
+  ngtcp2_conn_get_local_transport_params(conn_, &params);
+
+  std::array<uint8_t, 64> buf;
+
+  auto nwrite = ngtcp2_encode_transport_params(
+      buf.data(), buf.size(), NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS,
+      &params);
+  if (nwrite < 0) {
+    std::cerr << "ngtcp2_encode_transport_params: " << ngtcp2_strerror(nwrite)
+              << std::endl;
+    return -1;
+  }
+
+  if (auto rv = gnutls_buffer_append_data(extdata, buf.data(), nwrite);
+      rv != 0) {
+    std::cerr << "gnutls_buffer_append_data failed: " << gnutls_strerror(rv)
+              << std::endl;
+    return -1;
+  }
+
+  return nwrite;
+}
+
+namespace {
 std::ofstream keylog_file;
 int keylog_callback(gnutls_session_t session, const char *label,
                     const gnutls_datum_t *secret) {
@@ -1414,11 +1483,6 @@ int client_hello_cb(gnutls_session_t session, unsigned int htype, unsigned when,
   assert(htype == GNUTLS_HANDSHAKE_CLIENT_HELLO);
   assert(when == GNUTLS_HOOK_POST);
   assert(incoming == 1);
-
-  // check if quic_transport_params extension is present
-  if (auto tp = gnutls_quic_get_peer_transport_params(session); tp == NULL) {
-    return -1;
-  }
 
   // check if ALPN extension is present and properly selected h3
   gnutls_datum_t alpn;
@@ -1491,6 +1555,15 @@ int Handler::init(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
   gnutls_alert_set_read_function(session_, alert_read_func);
   gnutls_handshake_set_hook_function(session_, GNUTLS_HANDSHAKE_CLIENT_HELLO,
                                      GNUTLS_HOOK_POST, client_hello_cb);
+  if (auto rv = gnutls_session_ext_register(
+          session_, "QUIC Transport Parameters", 0xffa5, GNUTLS_EXT_TLS,
+          tp_recv_func, tp_send_func, NULL, NULL, NULL,
+          GNUTLS_EXT_FLAG_TLS | GNUTLS_EXT_FLAG_CLIENT_HELLO |
+              GNUTLS_EXT_FLAG_EE);
+      rv != 0) {
+    std::cerr << "gnutls_session_ext_register failed: " << gnutls_strerror(rv)
+              << std::endl;
+  }
 
   gnutls_anti_replay_init(&anti_replay_);
   gnutls_anti_replay_set_add_function(anti_replay_, anti_replay_db_add_func);
@@ -1630,24 +1703,6 @@ int Handler::init(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
                                        &callbacks, &settings, nullptr, this);
       rv != 0) {
     std::cerr << "ngtcp2_conn_server_new: " << ngtcp2_strerror(rv) << std::endl;
-    return -1;
-  }
-
-  std::array<uint8_t, 512> buf;
-
-  auto nwrite = ngtcp2_encode_transport_params(
-      buf.data(), buf.size(), NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS,
-      &params);
-  if (nwrite < 0) {
-    std::cerr << "ngtcp2_encode_transport_params: " << ngtcp2_strerror(nwrite)
-              << std::endl;
-    return -1;
-  }
-
-  if (auto rv = gnutls_quic_set_transport_params(session_, buf.data(), nwrite);
-      rv != 0) {
-    std::cerr << "gnutls_quic_set_transport_params failed: "
-              << gnutls_strerror(rv) << std::endl;
     return -1;
   }
 
