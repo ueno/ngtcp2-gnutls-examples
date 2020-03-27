@@ -753,14 +753,13 @@ int Client::extend_max_stream_data(int64_t stream_id, uint64_t max_data) {
 }
 
 namespace {
-int hook_func(gnutls_session_t session, unsigned int htype,
-	      unsigned when, unsigned int incoming, const gnutls_datum_t *msg)
-{
+int hook_func(gnutls_session_t session, unsigned int htype, unsigned when,
+              unsigned int incoming, const gnutls_datum_t *msg) {
   if (config.session_file && htype == GNUTLS_HANDSHAKE_NEW_SESSION_TICKET) {
     gnutls_datum_t data;
     if (auto rv = gnutls_session_get_data2(session, &data); rv != 0) {
       std::cerr << "gnutls_session_get_data2 failed: " << gnutls_strerror(rv)
-		<< std::endl;
+                << std::endl;
       return rv;
     }
     auto f = std::ofstream(config.session_file);
@@ -859,7 +858,7 @@ int Client::init_session() {
   }
 
   gnutls_handshake_set_hook_function(session_, GNUTLS_HANDSHAKE_ANY,
-				     GNUTLS_HOOK_POST, hook_func);
+                                     GNUTLS_HOOK_POST, hook_func);
   gnutls_handshake_set_secret_function(session_, secret_func);
   gnutls_handshake_set_read_function(session_, read_func);
   gnutls_alert_set_read_function(session_, alert_read_func);
@@ -873,10 +872,12 @@ int Client::init_session() {
       f.seekg(0, std::ios::beg);
       f.read(content.data(), pos);
 
-      if (auto rv = gnutls_session_set_data(session_, content.data(), content.size()); rv != 0) {
-	std::cerr << "gnutls_session_set_data failed: "
-		  << gnutls_strerror(rv) << std::endl;
-	return -1;
+      if (auto rv =
+              gnutls_session_set_data(session_, content.data(), content.size());
+          rv != 0) {
+        std::cerr << "gnutls_session_set_data failed: " << gnutls_strerror(rv)
+                  << std::endl;
+        return -1;
       }
     }
   }

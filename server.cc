@@ -747,8 +747,8 @@ int Handler::handshake_completed() {
   }
 
   if (auto rv = gnutls_session_ticket_send(session_, 1, 0); rv != 0) {
-    std::cerr << "gnutls_session_ticket_send failed: "
-	      << gnutls_strerror(rv) << std::endl;
+    std::cerr << "gnutls_session_ticket_send failed: " << gnutls_strerror(rv)
+              << std::endl;
   }
 
   return 0;
@@ -1473,7 +1473,7 @@ int Handler::init(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
 
   if (auto rv = gnutls_session_ticket_key_generate(&key); rv != 0) {
     std::cerr << "gnutls_session_ticket_key_generate failed: "
-	      << gnutls_strerror(rv) << std::endl;
+              << gnutls_strerror(rv) << std::endl;
     return -1;
   }
 
@@ -1482,7 +1482,7 @@ int Handler::init(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
   gnutls_free(key.data);
   if (rv != 0) {
     std::cerr << "gnutls_session_ticket_enable_server failed: "
-	      << gnutls_strerror(rv) << std::endl;
+              << gnutls_strerror(rv) << std::endl;
     return -1;
   }
 
