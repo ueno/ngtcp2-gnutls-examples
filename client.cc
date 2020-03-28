@@ -2825,13 +2825,11 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-#if 0
-  if (auto rv = gnutls_certificate_set_x509_system_trust(xcred); rv != 0) {
+  if (auto rv = gnutls_certificate_set_x509_system_trust(xcred); rv < 0) {
     std::cerr << "gnutls_certificate_set_x509_system_trust failed: "
 	      << gnutls_strerror(rv) << std::endl;
     exit(EXIT_FAILURE);
   }
-#endif
 
   if (private_key_file != NULL && cert_file != NULL) {
     if (auto rv = gnutls_certificate_set_x509_key_file(
