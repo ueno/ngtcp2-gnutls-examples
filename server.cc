@@ -1538,7 +1538,8 @@ int Handler::init(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
   }
 
   if (auto rv =
-          gnutls_init(&session_, GNUTLS_SERVER | GNUTLS_ENABLE_EARLY_DATA);
+          gnutls_init(&session_, GNUTLS_SERVER | GNUTLS_ENABLE_EARLY_DATA |
+		      GNUTLS_NO_AUTO_SEND_TICKET);
       rv != 0) {
     std::cerr << "gnutls_init failed: " << gnutls_strerror(rv) << std::endl;
   }
