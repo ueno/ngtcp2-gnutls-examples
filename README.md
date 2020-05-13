@@ -36,10 +36,6 @@ $ PKG_CONFIG_PATH=$installdir/lib/pkgconfig meson _build
 $ ninja -C _build
 ```
 
-## Caveats
-
-- The server is not working yet, unless you compile ngtcp2 with -DNDEBUG=1.
-
 ## License
 
 Follows the same license with ngtcp2, that is The MIT License.
