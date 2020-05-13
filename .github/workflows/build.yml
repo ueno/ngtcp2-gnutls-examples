@@ -5,14 +5,14 @@ on: [ pull_request ]
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: quay.io/fedora/fedora
+    container: fedora
     steps:
     - uses: actions/checkout@v2
     - name: install packages
       run: |
         dnf -y install 'dnf-command(builddep)'
         dnf -y builddep gnutls
-        dnf -y install autoconf automake gcc-c++ gettext-devel libtool meson ninja-build
+        dnf -y install autoconf autogen-libopts-devel automake bison gcc-c++ gettext-devel git gperf libev-devel libtool make meson ninja-build patch wget
     - name: install nghttp3
       run: |
         git clone --depth=1 https://github.com/ngtcp2/nghttp3.git
@@ -40,7 +40,8 @@ jobs:
         make -j$(nproc)
         make install
         cd ..
-    - name: meson
-      run: PKG_CONFIG_PATH=$PWD/../installdir/lib/pkgconfig meson _build
-    - name: ninja
-      run: ninja -C _build
+    - name: build
+      run: |
+        git clone --depth=1 https://github.com/nodejs/http-parser.git
+        PKG_CONFIG_PATH=$PWD/installdir/lib/pkgconfig meson _build
+        ninja -C _build
