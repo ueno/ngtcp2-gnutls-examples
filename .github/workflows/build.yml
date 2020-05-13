@@ -1,0 +1,46 @@
+name: build
+
+on: [ pull_request ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: quay.io/fedora/fedora
+    steps:
+    - uses: actions/checkout@v2
+    - name: install packages
+      run: |
+        dnf -y install 'dnf-command(builddep)'
+        dnf -y builddep gnutls
+        dnf -y install autoconf automake gcc-c++ gettext-devel libtool meson ninja-build
+    - name: install nghttp3
+      run: |
+        git clone --depth=1 https://github.com/ngtcp2/nghttp3.git
+        cd nghttp3
+        autoreconf -i
+        ./configure --prefix=$PWD/../installdir --enable-lib-only
+        make -j$(nproc)
+        make install
+        cd ..
+    - name: install gnutls
+      run: |
+        git clone --depth=1 -b tmp-quic https://gitlab.com/gnutls/gnutls.git
+        cd gnutls
+        ./bootstrap
+        ./configure --disable-doc --disable-guile --prefix=$PWD/../installdir
+        make -j$(nproc)
+        make install
+        cd ..
+    - name: install ngtcp2
+      run: |
+        git clone --depth=1 https://github.com/ngtcp2/ngtcp2.git
+        cd ngtcp2
+        autoreconf -i
+        PKG_CONFIG_PATH=$PWD/../installdir/lib/pkgconfig ./configure --prefix=$PWD/../installdir --enable-lib-only
+        make -j$(nproc)
+        make install
+        cd ..
+    - name: meson
+      run: PKG_CONFIG_PATH=$PWD/../installdir/lib/pkgconfig meson _build
+    - name: ninja
+      run: ninja -C _build
