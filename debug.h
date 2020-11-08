@@ -33,14 +33,16 @@
 #define __STDC_FORMAT_MACROS
 #include <cinttypes>
 
-#include <nghttp3/nghttp3.h>
 #include <ngtcp2/ngtcp2.h>
+#include <nghttp3/nghttp3.h>
 
 namespace ngtcp2 {
 
 namespace debug {
 
 int handshake_completed(ngtcp2_conn *conn, void *user_data);
+
+int handshake_confirmed(ngtcp2_conn *conn, void *user_data);
 
 bool packet_lost(double prob);
 

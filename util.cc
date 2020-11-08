@@ -33,15 +33,16 @@
 #endif
 #include <netdb.h>
 
-#include <gnutls/crypto.h>
-
-#include <algorithm>
-#include <array>
 #include <cassert>
+#include <cstring>
 #include <chrono>
-#include <fstream>
+#include <array>
 #include <iostream>
+#include <fstream>
+#include <algorithm>
 #include <limits>
+
+#include <gnutls/crypto.h>
 
 #include "template.h"
 
@@ -79,21 +80,6 @@ std::string format_hex(const uint8_t *s, size_t len) {
 std::string format_hex(const std::string &s) {
   return format_hex(reinterpret_cast<const uint8_t *>(s.data()), s.size());
 }
-
-namespace {
-uint32_t hex_to_uint(char c) {
-  if (c <= '9') {
-    return c - '0';
-  }
-  if (c <= 'Z') {
-    return c - 'A' + 10;
-  }
-  if (c <= 'z') {
-    return c - 'a' + 10;
-  }
-  return 256;
-}
-} // namespace
 
 std::string decode_hex(const std::string &s) {
   assert(s.size() % 2 == 0);
@@ -168,7 +154,9 @@ std::mt19937 make_mt19937() {
 }
 
 ngtcp2_tstamp timestamp(struct ev_loop *loop) {
-  return ev_now(loop) * NGTCP2_SECONDS;
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
 }
 
 bool numeric_host(const char *hostname) {
@@ -276,7 +264,7 @@ namespace {
 constexpr bool rws(char c) { return c == '\t' || c == ' '; }
 } // namespace
 
-int read_mime_types(std::map<std::string, std::string> &dest,
+int read_mime_types(std::unordered_map<std::string, std::string> &dest,
                     const char *filename) {
   std::ifstream f(filename);
   if (!f) {
@@ -439,7 +427,7 @@ std::pair<uint64_t, int> parse_duration(const std::string_view &s) {
     return {0, rv};
   }
   if (idx == s.size()) {
-    return {res, 0};
+    return {res * NGTCP2_SECONDS, 0};
   }
 
   uint64_t m;
@@ -509,6 +497,100 @@ int generate_secret(uint8_t *secret, size_t secretlen) {
   return 0;
 }
 
+namespace {
+template <typename InputIt> InputIt eat_file(InputIt first, InputIt last) {
+  if (first == last) {
+    *first++ = '/';
+    return first;
+  }
+
+  if (*(last - 1) == '/') {
+    return last;
+  }
+
+  auto p = last;
+  for (; p != first && *(p - 1) != '/'; --p)
+    ;
+  if (p == first) {
+    // this should not happened in normal case, where we expect path
+    // starts with '/'
+    *first++ = '/';
+    return first;
+  }
+
+  return p;
+}
+} // namespace
+
+namespace {
+template <typename InputIt> InputIt eat_dir(InputIt first, InputIt last) {
+  auto p = eat_file(first, last);
+
+  --p;
+
+  assert(*p == '/');
+
+  return eat_file(first, p);
+}
+} // namespace
+
+std::string normalize_path(const std::string &path) {
+  assert(path.size() <= 1024);
+  assert(path.size() > 0);
+  assert(path[0] == '/');
+
+  std::array<char, 1024> res;
+  auto p = res.data();
+
+  auto first = std::begin(path);
+  auto last = std::end(path);
+
+  *p++ = '/';
+  ++first;
+  for (; first != last && *first == '/'; ++first)
+    ;
+
+  for (; first != last;) {
+    if (*first == '.') {
+      if (first + 1 == last) {
+        break;
+      }
+      if (*(first + 1) == '/') {
+        first += 2;
+        continue;
+      }
+      if (*(first + 1) == '.') {
+        if (first + 2 == last) {
+          p = eat_dir(res.data(), p);
+          break;
+        }
+        if (*(first + 2) == '/') {
+          p = eat_dir(res.data(), p);
+          first += 3;
+          continue;
+        }
+      }
+    }
+    if (*(p - 1) != '/') {
+      p = eat_file(res.data(), p);
+    }
+    auto slash = std::find(first, last, '/');
+    if (slash == last) {
+      p = std::copy(first, last, p);
+      break;
+    }
+    p = std::copy(first, slash + 1, p);
+    first = slash + 1;
+    for (; first != last && *first == '/'; ++first)
+      ;
+  }
+  return std::string{res.data(), p};
+}
+
 } // namespace util
+
+std::ostream &operator<<(std::ostream &os, const ngtcp2_cid &cid) {
+  return os << "0x" << util::format_hex(cid.data, cid.datalen);
+}
 
 } // namespace ngtcp2

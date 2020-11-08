@@ -33,10 +33,28 @@
 
 namespace ngtcp2 {
 
+constexpr uint8_t HQ_ALPN[] = "\x5hq-29\x5hq-30\x5hq-31\x5hq-32";
+constexpr uint8_t HQ_ALPN_DRAFT29[] = "\x5hq-29";
+constexpr uint8_t HQ_ALPN_DRAFT30[] = "\x5hq-30";
+constexpr uint8_t HQ_ALPN_DRAFT31[] = "\x5hq-31";
+constexpr uint8_t HQ_ALPN_DRAFT32[] = "\x5hq-32";
+
+constexpr uint8_t H3_ALPN[] = "\x5h3-29\x5h3-30\x5h3-31\x5h3-32";
+constexpr uint8_t H3_ALPN_DRAFT29[] = "\x5h3-29";
+constexpr uint8_t H3_ALPN_DRAFT30[] = "\x5h3-30";
+constexpr uint8_t H3_ALPN_DRAFT31[] = "\x5h3-31";
+constexpr uint8_t H3_ALPN_DRAFT32[] = "\x5h3-32";
+
+constexpr uint32_t QUIC_VER_DRAFT29 = 0xff00001du;
+constexpr uint32_t QUIC_VER_DRAFT30 = 0xff00001eu;
+constexpr uint32_t QUIC_VER_DRAFT31 = 0xff00001fu;
+constexpr uint32_t QUIC_VER_DRAFT32 = 0xff000020u;
+
 enum class QUICErrorType {
   Application,
   Transport,
   TransportVersionNegotiation,
+  TransportIdleTimeout,
 };
 
 struct QUICError {
@@ -48,9 +66,23 @@ struct QUICError {
 
 QUICError quic_err_transport(int liberr);
 
+QUICError quic_err_idle_timeout();
+
 QUICError quic_err_tls(int alert);
 
 QUICError quic_err_app(int liberr);
+
+// msghdr_get_ecn gets ECN bits from |msg|.  |family| is the address
+// family from which packet is received.
+unsigned int msghdr_get_ecn(msghdr *msg, int family);
+
+// fd_set_ecn sets ECN bits |ecn| to |fd|.  |family| is the address
+// family of |fd|.
+void fd_set_ecn(int fd, int family, unsigned int ecn);
+
+// fd_set_recv_ecn sets socket option to |fd| so that it can receive
+// ECN bits.
+void fd_set_recv_ecn(int fd, int family);
 
 } // namespace ngtcp2
 
