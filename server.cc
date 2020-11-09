@@ -1411,7 +1411,7 @@ int Handler::set_remote_transport_params(const uint8_t *data, size_t datalen) {
   ngtcp2_transport_params params;
 
   if (auto rv = ngtcp2_decode_transport_params(
-          &params, NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS, data,
+          &params, NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO, data,
           datalen);
       rv != 0) {
     std::cerr << "ngtcp2_decode_transport_params: " << ngtcp2_strerror(rv)
