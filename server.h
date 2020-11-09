@@ -29,15 +29,15 @@
 #  include <config.h>
 #endif // HAVE_CONFIG_H
 
-#include <deque>
-#include <map>
-#include <string>
-#include <string_view>
 #include <vector>
+#include <unordered_map>
+#include <string>
+#include <deque>
+#include <string_view>
 
-#include <nghttp3/nghttp3.h>
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
+#include <nghttp3/nghttp3.h>
 
 #include <ev.h>
 #include <gnutls/gnutls.h>
@@ -63,7 +63,7 @@ struct Config {
   // /etc/mime/types.
   const char *mime_types_file;
   // mime_types maps file extension to MIME media type.
-  std::map<std::string, std::string> mime_types;
+  std::unordered_map<std::string, std::string> mime_types;
   // port is the port number which server listens on for incoming
   // connections.
   uint16_t port;
@@ -111,12 +111,28 @@ struct Config {
   // max_streams_uni is the number of the concurrent unidirectional
   // streams.
   uint64_t max_streams_uni;
+  // max_window is the maximum connection-level flow control window
+  // size if auto-tuning is enabled.
+  uint64_t max_window;
+  // max_stream_window is the maximum stream-level flow control window
+  // size if auto-tuning is enabled.
+  uint64_t max_stream_window;
   // max_dyn_length is the maximum length of dynamically generated
   // response.
   uint64_t max_dyn_length;
   // static_secret is used to derive keying materials for Retry and
   // Stateless Retry token.
   std::array<uint8_t, 32> static_secret;
+  // cc is the congestion controller algorithm.
+  std::string_view cc;
+  // initial_rtt is an initial RTT.
+  ngtcp2_duration initial_rtt;
+  // max_udp_payload_size is the maximum UDP payload size that server
+  // transmits.  If it is 0, the default value is chosen.
+  size_t max_udp_payload_size;
+  // send_trailers controls whether server sends trailer fields or
+  // not.
+  bool send_trailers;
 };
 
 struct Buffer {
@@ -149,14 +165,14 @@ struct HTTPHeader {
 };
 
 class Handler;
+struct FileEntry;
 
 struct Stream {
   Stream(int64_t stream_id, Handler *handler);
-  ~Stream();
 
   int start_response(nghttp3_conn *conn);
-  int open_file(const std::string &path);
-  int map_file(size_t len);
+  std::pair<FileEntry, int> open_file(const std::string &path);
+  void map_file(const FileEntry &fe);
   int send_status_response(nghttp3_conn *conn, unsigned int status_code,
                            const std::vector<HTTPHeader> &extra_headers = {});
   int send_redirect_response(nghttp3_conn *conn, unsigned int status_code,
@@ -170,9 +186,6 @@ struct Stream {
   std::string uri;
   std::string method;
   std::string authority;
-  // fd is a file descriptor to read file to send its content to a
-  // client.
-  int fd;
   std::string status_resp_body;
   // data is a pointer to the memory which maps file denoted by fd.
   uint8_t *data;
@@ -184,8 +197,6 @@ struct Stream {
   uint64_t dyndataleft;
   // dynbuflen is the number of bytes in-flight.
   uint64_t dynbuflen;
-  // mmapped is true if data points to the memory assigned by mmap.
-  bool mmapped;
 };
 
 class Server;
@@ -196,6 +207,8 @@ struct Endpoint {
   ev_io rev;
   Server *server;
   int fd;
+  // ecn is the last ECN bits set to fd.
+  unsigned int ecn;
 };
 
 struct Crypto {
@@ -218,11 +231,11 @@ public:
            uint32_t version);
 
   int on_read(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
-              uint8_t *data, size_t datalen);
+              const ngtcp2_pkt_info *pi, uint8_t *data, size_t datalen);
   int on_write();
   int write_streams();
   int feed_data(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
-                uint8_t *data, size_t datalen);
+                const ngtcp2_pkt_info *pi, uint8_t *data, size_t datalen);
   void schedule_retransmit();
   int handle_expiry();
   void signal_write();
@@ -234,19 +247,18 @@ public:
   int recv_crypto_data(ngtcp2_crypto_level crypto_level, const uint8_t *data,
                        size_t datalen);
 
-  int recv_client_initial(const ngtcp2_cid *dcid);
   Server *server() const;
   const Address &remote_addr() const;
   ngtcp2_conn *conn() const;
-  int recv_stream_data(int64_t stream_id, uint8_t fin, const uint8_t *data,
+  int recv_stream_data(uint32_t flags, int64_t stream_id, const uint8_t *data,
                        size_t datalen);
-  int acked_stream_data_offset(int64_t stream_id, size_t datalen);
+  int acked_stream_data_offset(int64_t stream_id, uint64_t datalen);
   const ngtcp2_cid *scid() const;
   const ngtcp2_cid *pscid() const;
   const ngtcp2_cid *rcid() const;
   uint32_t version() const;
   void remove_tx_crypto_data(ngtcp2_crypto_level crypto_level, uint64_t offset,
-                             size_t datalen);
+                             uint64_t datalen);
   void on_stream_open(int64_t stream_id);
   int on_stream_close(int64_t stream_id, uint64_t app_error_code);
   void start_draining_period();
@@ -255,7 +267,7 @@ public:
   int handle_error();
   int send_conn_close();
   void update_endpoint(const ngtcp2_addr *addr);
-  void update_remote_addr(const ngtcp2_addr *addr);
+  void update_remote_addr(const ngtcp2_addr *addr, const ngtcp2_pkt_info *pi);
 
   int on_key(ngtcp2_crypto_level level, const uint8_t *rsecret,
              const uint8_t *wsecret, size_t secretlen);
@@ -264,8 +276,9 @@ public:
   int set_remote_transport_params(const uint8_t *data, size_t datalen);
   int append_local_transport_params(gnutls_buffer_st *extdata);
 
-  int update_key(uint8_t *rx_secret, uint8_t *tx_secret, uint8_t *rx_key,
-                 uint8_t *rx_iv, uint8_t *tx_key, uint8_t *tx_iv,
+  int update_key(uint8_t *rx_secret, uint8_t *tx_secret,
+                 ngtcp2_crypto_aead_ctx *rx_aead_ctx, uint8_t *rx_iv,
+                 ngtcp2_crypto_aead_ctx *tx_aead_ctx, uint8_t *tx_iv,
                  const uint8_t *current_rx_secret,
                  const uint8_t *current_tx_secret, size_t secretlen);
 
@@ -274,17 +287,20 @@ public:
   void extend_max_remote_streams_bidi(uint64_t max_streams);
   Stream *find_stream(int64_t stream_id);
   void http_begin_request_headers(int64_t stream_id);
-  void http_recv_request_header(int64_t stream_id, int32_t token,
+  void http_recv_request_header(Stream *stream, int32_t token,
                                 nghttp3_rcbuf *name, nghttp3_rcbuf *value);
-  int http_end_request_headers(int64_t stream_id);
-  int http_end_stream(int64_t stream_id);
-  int start_response(int64_t stream_id);
+  int http_end_request_headers(Stream *stream);
+  int http_end_stream(Stream *stream);
+  int start_response(Stream *stream);
   int on_stream_reset(int64_t stream_id);
   int extend_max_stream_data(int64_t stream_id, uint64_t max_data);
   void shutdown_read(int64_t stream_id, int app_error_code);
-  void http_acked_stream_data(int64_t stream_id, size_t datalen);
+  void http_acked_stream_data(Stream *stream, size_t datalen);
   int push_content(int64_t stream_id, const std::string_view &authority,
                    const std::string_view &path);
+  void http_stream_close(int64_t stream_id, uint64_t app_error_code);
+  int http_send_stop_sending(int64_t stream_id, uint64_t app_error_code);
+  int http_reset_stream(int64_t stream_id, uint64_t app_error_code);
 
   void reset_idle_timer();
 
@@ -294,6 +310,7 @@ public:
 private:
   Endpoint *endpoint_;
   Address remote_addr_;
+  unsigned int ecn_;
   size_t max_pktlen_;
   struct ev_loop *loop_;
   gnutls_certificate_credentials_t cred_;
@@ -310,9 +327,7 @@ private:
   ngtcp2_cid pscid_;
   ngtcp2_cid rcid_;
   nghttp3_conn *httpconn_;
-  std::map<int64_t, std::unique_ptr<Stream>> streams_;
-  // common buffer used to store packet data before sending
-  Buffer sendbuf_;
+  std::unordered_map<int64_t, std::unique_ptr<Stream>> streams_;
   // conn_closebuf_ contains a packet which contains CONNECTION_CLOSE.
   // This packet is repeatedly sent as a response to the incoming
   // packet in draining period.
@@ -342,12 +357,16 @@ public:
                  socklen_t salen);
   int send_stateless_connection_close(const ngtcp2_pkt_hd *chd, Endpoint &ep,
                                       const sockaddr *sa, socklen_t salen);
-  int generate_token(uint8_t *token, size_t &tokenlen, const sockaddr *sa,
-                     socklen_t salen, const ngtcp2_cid *ocid);
-  int verify_token(ngtcp2_cid *ocid, const ngtcp2_pkt_hd *hd,
-                   const sockaddr *sa, socklen_t salen);
-  int send_packet(Endpoint &ep, const Address &remote_addr, const uint8_t *data,
-                  size_t datalen, size_t gso_size, ev_io *wev = nullptr);
+  int generate_retry_token(uint8_t *token, size_t &tokenlen, const sockaddr *sa,
+                           socklen_t salen, const ngtcp2_cid *scid,
+                           const ngtcp2_cid *ocid);
+  int verify_retry_token(ngtcp2_cid *ocid, const ngtcp2_pkt_hd *hd,
+                         const sockaddr *sa, socklen_t salen);
+  int generate_token(uint8_t *token, size_t &tokenlen, const sockaddr *sa);
+  int verify_token(const ngtcp2_pkt_hd *hd, const sockaddr *sa,
+                   socklen_t salen);
+  int send_packet(Endpoint &ep, const Address &remote_addr, unsigned int ecn,
+                  const uint8_t *data, size_t datalen, size_t gso_size);
   void remove(const Handler *h);
 
   int derive_token_key(uint8_t *key, size_t &keylen, uint8_t *iv, size_t &ivlen,
@@ -357,10 +376,10 @@ public:
   void dissociate_cid(const ngtcp2_cid *cid);
 
 private:
-  std::map<std::string, std::unique_ptr<Handler>> handlers_;
+  std::unordered_map<std::string, std::unique_ptr<Handler>> handlers_;
   // ctos_ is a mapping between client's initial destination
   // connection ID, and server source connection ID.
-  std::map<std::string, std::string> ctos_;
+  std::unordered_map<std::string, std::string> ctos_;
   struct ev_loop *loop_;
   std::vector<Endpoint> endpoints_;
   gnutls_certificate_credentials_t cred_;

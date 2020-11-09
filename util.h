@@ -32,15 +32,14 @@
 
 #include <sys/socket.h>
 
-#include <map>
-#include <random>
 #include <string>
+#include <random>
+#include <unordered_map>
 #include <string_view>
 
-#include <nghttp3/nghttp3.h>
 #include <ngtcp2/ngtcp2.h>
+#include <nghttp3/nghttp3.h>
 
-#define GNUTLS_EPHEMERAL_API 1
 #include <gnutls/gnutls.h>
 
 #include <ev.h>
@@ -207,7 +206,7 @@ template <typename InputIt> std::string b64encode(InputIt first, InputIt last) {
 // read_mime_types reads "MIME media types and the extensions" file
 // denoted by |filename| and stores the mapping of extension to MIME
 // media type in |dest|.  It returns 0 if it succeeds, or -1.
-int read_mime_types(std::map<std::string, std::string> &dest,
+int read_mime_types(std::unordered_map<std::string, std::string> &dest,
                     const char *filename);
 
 // from_gtls_level translates |ossl_level| to ngtcp2_crypto_level.
@@ -269,8 +268,9 @@ std::pair<uint64_t, int> parse_uint(const std::string_view &s);
 std::pair<uint64_t, int> parse_uint_iec(const std::string_view &s);
 
 // parse_duration parses |s| as 64-bit unsigned integer.  It accepts a
-// unit (either "h", "m", "s", "ms", "us", or "ns") in |s|.  If it
-// cannot parse |s|, it returns -1 as the second return value.
+// unit (either "h", "m", "s", "ms", "us", or "ns") in |s|.  If no
+// unit is present, the unit "s" is assumed.  If it cannot parse |s|,
+// it returns -1 as the second return value.
 std::pair<uint64_t, int> parse_duration(const std::string_view &s);
 
 // generate_secret generates secret and writes it to the buffer
@@ -278,7 +278,59 @@ std::pair<uint64_t, int> parse_duration(const std::string_view &s);
 // must be 32.
 int generate_secret(uint8_t *secret, size_t secretlen);
 
+// normalize_path removes ".." by consuming a previous path component.
+// It also removes ".".  It assumes that |path| starts with "/".  If
+// it cannot consume a previous path component, it just removes "..".
+std::string normalize_path(const std::string &path);
+
+constexpr bool is_digit(const char c) { return '0' <= c && c <= '9'; }
+
+constexpr bool is_hex_digit(const char c) {
+  return is_digit(c) || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f');
+}
+
+// Returns integer corresponding to hex notation |c|.  If
+// is_hex_digit(c) is false, it returns 256.
+constexpr uint32_t hex_to_uint(char c) {
+  if (c <= '9') {
+    return c - '0';
+  }
+  if (c <= 'Z') {
+    return c - 'A' + 10;
+  }
+  if (c <= 'z') {
+    return c - 'a' + 10;
+  }
+  return 256;
+}
+
+template <typename InputIt>
+std::string percent_decode(InputIt first, InputIt last) {
+  std::string result;
+  result.resize(last - first);
+  auto p = std::begin(result);
+  for (; first != last; ++first) {
+    if (*first != '%') {
+      *p++ = *first;
+      continue;
+    }
+
+    if (first + 1 != last && first + 2 != last && is_hex_digit(*(first + 1)) &&
+        is_hex_digit(*(first + 2))) {
+      *p++ = (hex_to_uint(*(first + 1)) << 4) + hex_to_uint(*(first + 2));
+      first += 2;
+      continue;
+    }
+
+    *p++ = *first;
+  }
+  result.resize(p - std::begin(result));
+  return result;
+}
+
 } // namespace util
+
+std::ostream &operator<<(std::ostream &os, const ngtcp2_cid &cid);
 
 } // namespace ngtcp2
 

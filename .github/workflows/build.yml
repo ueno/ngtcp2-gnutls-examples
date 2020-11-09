@@ -24,7 +24,7 @@ jobs:
         cd ..
     - name: install gnutls
       run: |
-        git clone --depth=1 -b tmp-quic https://gitlab.com/gnutls/gnutls.git
+        git clone --depth=1 -b wip/dueno/quic https://gitlab.com/dueno/gnutls.git
         cd gnutls
         ./bootstrap
         ./configure --disable-doc --disable-guile --prefix=$PWD/../installdir
