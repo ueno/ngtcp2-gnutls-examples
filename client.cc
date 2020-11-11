@@ -773,16 +773,26 @@ int recv_new_token(ngtcp2_conn *conn, const ngtcp2_vec *token,
     return 0;
   }
 
-#if 0
-  auto f = BIO_new_file(config.token_file.data(), "w");
-  if (f == nullptr) {
+  auto f = std::ofstream(static_cast<std::string>(config.token_file));
+  if (!f) {
     std::cerr << "Could not write token in " << config.token_file << std::endl;
     return 0;
   }
 
-  PEM_write_bio(f, "QUIC TOKEN", "", token->base, token->len);
-  BIO_free(f);
-#endif
+  gnutls_datum_t s;
+  s.data = token->base;
+  s.size = token->len;
+
+  gnutls_datum_t d;
+  if (auto rv = gnutls_pem_base64_encode2("QUIC TOKEN", &s, &d); rv < 0) {
+    std::cerr << "Could not encode token in " << config.token_file << std::endl;
+    f.close();
+    return 0;
+  }
+
+  f.write(reinterpret_cast<const char *>(d.data), d.size);
+  f.close();
+  gnutls_free(d.data);
 
   return 0;
 }
@@ -1145,6 +1155,36 @@ int Client::init(int fd, const Address &local_addr, const Address &remote_addr,
   settings.initial_rtt = config.initial_rtt;
   settings.max_window = config.max_window;
   settings.max_stream_window = config.max_stream_window;
+
+  if (!config.token_file.empty()) {
+    std::cerr << "Reading token file " << config.token_file << std::endl;
+    auto f = std::ifstream(config.token_file.data());
+    if (!f) {
+      std::cerr << "Could not read token file " << config.token_file << std::endl;
+      return -1;
+    }
+
+    auto pos = f.tellg();
+    std::vector<char> content(pos);
+    f.seekg(0, std::ios::beg);
+    f.read(content.data(), pos);
+
+    gnutls_datum_t s;
+    s.data = reinterpret_cast<unsigned char *>(content.data());
+    s.size = content.size();
+
+    gnutls_datum_t d;
+    if (auto rv = gnutls_pem_base64_decode2("QUIC TOKEN", &s, &d); rv < 0) {
+      std::cerr << "Could not read token in " << config.token_file << std::endl;
+      f.close();
+      return -1;
+    }
+
+    settings.token.base = d.data;
+    settings.token.len = d.size;
+
+    f.close();
+  }
 
   auto &params = settings.transport_params;
   params.initial_max_stream_data_bidi_local = config.max_stream_data_bidi_local;
