@@ -2,7 +2,7 @@
 
 ## Compiling
 
-1. Build and install nghttp3, gnutls (patched), ngtcp2 in a dedicated directory ('$installdir' hereafter):
+1. Build and install nghttp3, gnutls, ngtcp2 in a dedicated directory ('$installdir' hereafter):
 ```sh
 $ git clone https://github.com/ngtcp2/nghttp3.git
 $ cd nghttp3
