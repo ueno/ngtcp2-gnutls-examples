@@ -14,9 +14,8 @@ $ cd ..
 
 $ git clone https://gitlab.com/gnutls/gnutls.git
 $ cd gnutls
-$ git checkout tmp-quic
 $ ./bootstrap
-$ ./configure --prefix=$installdir --disable-doc
+$ ./configure --prefix=$installdir --disable-doc --disable-guile
 $ make -j$(nproc) check
 $ make install
 $ cd ..
