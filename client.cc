@@ -202,7 +202,7 @@ int Client::on_key(ngtcp2_crypto_level level, const uint8_t *rx_secret,
     keylog::log_secret(session_, keylog::QUIC_CLIENT_HANDSHAKE_TRAFFIC_SECRET,
                        tx_secret, secretlen);
     break;
-  case NGTCP2_CRYPTO_LEVEL_APP:
+  case NGTCP2_CRYPTO_LEVEL_APPLICATION:
     title = "application_traffic";
     keylog::log_secret(session_, keylog::QUIC_SERVER_TRAFFIC_SECRET_0,
                        rx_secret, secretlen);
@@ -224,7 +224,7 @@ int Client::on_key(ngtcp2_crypto_level level, const uint8_t *rx_secret,
                          tx_iv.data(), ivlen, tx_hp_key.data(), keylen);
   }
 
-  if (level == NGTCP2_CRYPTO_LEVEL_APP) {
+  if (level == NGTCP2_CRYPTO_LEVEL_APPLICATION) {
     if (config.tp_file) {
       ngtcp2_transport_params params;
 
@@ -1022,9 +1022,9 @@ int Client::init_session() {
 
   gnutls_datum_t alpn = {NULL, 0};
 
-  // strip the first byte from H3_ALPN_DRAFT32
-  alpn.data = (unsigned char *)&H3_ALPN_DRAFT32[1];
-  alpn.size = H3_ALPN_DRAFT32[0];
+  // strip the first byte from H3_ALPN_DRAFT29
+  alpn.data = (unsigned char *)&H3_ALPN_DRAFT29[1];
+  alpn.size = H3_ALPN_DRAFT29[0];
   gnutls_alpn_set_protocols(session_, &alpn, 1, 0);
 
   if (util::numeric_host(addr_)) {
@@ -1072,7 +1072,7 @@ int Client::init(int fd, const Address &local_addr, const Address &remote_addr,
     return -1;
   }
 
-  auto callbacks = ngtcp2_conn_callbacks{
+  auto callbacks = ngtcp2_callbacks{
       ngtcp2_crypto_client_initial_cb,
       nullptr, // recv_client_initial
       ::recv_crypto_data,
@@ -2315,7 +2315,7 @@ int Client::setup_httpconn() {
     return -1;
   }
 
-  nghttp3_conn_callbacks callbacks{
+  nghttp3_callbacks callbacks{
       ::http_acked_stream_data,  ::http_stream_close,
       ::http_recv_data,          ::http_deferred_consume,
       ::http_begin_headers,      ::http_recv_header,
@@ -2325,8 +2325,8 @@ int Client::setup_httpconn() {
       ::http_end_push_promise,   ::http_cancel_push,
       ::http_send_stop_sending,  ::http_push_stream,
   };
-  nghttp3_conn_settings settings;
-  nghttp3_conn_settings_default(&settings);
+  nghttp3_settings settings;
+  nghttp3_settings_default(&settings);
   settings.qpack_max_table_capacity = 4096;
   settings.qpack_blocked_streams = 100;
   settings.max_pushes = 100;
