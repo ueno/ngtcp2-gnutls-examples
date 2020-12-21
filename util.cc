@@ -307,7 +307,7 @@ from_gtls_level(gnutls_record_encryption_level_t gtls_level) {
   case GNUTLS_ENCRYPTION_LEVEL_HANDSHAKE:
     return NGTCP2_CRYPTO_LEVEL_HANDSHAKE;
   case GNUTLS_ENCRYPTION_LEVEL_APPLICATION:
-    return NGTCP2_CRYPTO_LEVEL_APP;
+    return NGTCP2_CRYPTO_LEVEL_APPLICATION;
   default:
     assert(0);
   }
@@ -320,7 +320,7 @@ from_ngtcp2_level(ngtcp2_crypto_level crypto_level) {
     return GNUTLS_ENCRYPTION_LEVEL_INITIAL;
   case NGTCP2_CRYPTO_LEVEL_HANDSHAKE:
     return GNUTLS_ENCRYPTION_LEVEL_HANDSHAKE;
-  case NGTCP2_CRYPTO_LEVEL_APP:
+  case NGTCP2_CRYPTO_LEVEL_APPLICATION:
     return GNUTLS_ENCRYPTION_LEVEL_APPLICATION;
   case NGTCP2_CRYPTO_LEVEL_EARLY:
     return GNUTLS_ENCRYPTION_LEVEL_EARLY;

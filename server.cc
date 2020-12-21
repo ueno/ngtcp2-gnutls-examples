@@ -140,7 +140,7 @@ int Handler::on_key(ngtcp2_crypto_level level, const uint8_t *rx_secret,
     keylog::log_secret(session_, keylog::QUIC_SERVER_HANDSHAKE_TRAFFIC_SECRET,
                        tx_secret, secretlen);
     break;
-  case NGTCP2_CRYPTO_LEVEL_APP:
+  case NGTCP2_CRYPTO_LEVEL_APPLICATION:
     title = "application_traffic";
     if (rx_secret) {
       keylog::log_secret(session_, keylog::QUIC_CLIENT_TRAFFIC_SECRET_0,
@@ -166,7 +166,7 @@ int Handler::on_key(ngtcp2_crypto_level level, const uint8_t *rx_secret,
     }
   }
 
-  if (level == NGTCP2_CRYPTO_LEVEL_APP && setup_httpconn() != 0) {
+  if (level == NGTCP2_CRYPTO_LEVEL_APPLICATION && setup_httpconn() != 0) {
     return -1;
   }
 
@@ -1407,7 +1407,7 @@ int Handler::setup_httpconn() {
     return -1;
   }
 
-  nghttp3_conn_callbacks callbacks{
+  nghttp3_callbacks callbacks{
       ::http_acked_stream_data, // acked_stream_data
       ::http_stream_close,
       ::http_recv_data,
@@ -1427,8 +1427,8 @@ int Handler::setup_httpconn() {
       ::http_end_stream,
       ::http_reset_stream,
   };
-  nghttp3_conn_settings settings;
-  nghttp3_conn_settings_default(&settings);
+  nghttp3_settings settings;
+  nghttp3_settings_default(&settings);
   settings.qpack_max_table_capacity = 4096;
   settings.qpack_blocked_streams = 100;
 
@@ -1802,7 +1802,7 @@ int Handler::init(const Endpoint &ep, const sockaddr *sa, socklen_t salen,
   alpn.size = H3_ALPN_DRAFT32[0];
   gnutls_alpn_set_protocols(session_, &alpn, 1, 0);
 
-  auto callbacks = ngtcp2_conn_callbacks{
+  auto callbacks = ngtcp2_callbacks{
       nullptr, // client_initial
       ngtcp2_crypto_recv_client_initial_cb,
       ::recv_crypto_data,
@@ -2037,18 +2037,6 @@ void Handler::reset_idle_timer() {
 
 int Handler::handle_expiry() {
   auto now = util::timestamp(loop_);
-  if (ngtcp2_conn_loss_detection_expiry(conn_) <= now) {
-    if (!config.quiet) {
-      std::cerr << "Loss detection timer expired" << std::endl;
-    }
-  }
-
-  if (ngtcp2_conn_ack_delay_expiry(conn_) <= now) {
-    if (!config.quiet) {
-      std::cerr << "Delayed ACK timer expired" << std::endl;
-    }
-  }
-
   if (auto rv = ngtcp2_conn_handle_expiry(conn_, now); rv != 0) {
     std::cerr << "ngtcp2_conn_handle_expiry: " << ngtcp2_strerror(rv)
               << std::endl;
